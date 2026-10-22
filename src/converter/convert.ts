@@ -111,6 +111,14 @@ function protectInlineCode(input: string) {
  */
 function normalizeMath(input: string) {
   return input
+    // 部分來源會把行內數學的美元符號跳脫，例如 `\\$n\\$`；
+    // 還原成 remark-math 可辨識的 `$n$`。
+    .replace(/\\\$([^\n]+?)\\\$/g, "$$$1$$")
+    // 有些來源（例如 Markdown/JSON 中的 escaped LaTeX）會把區塊
+    // 分隔符輸出成 `\\\\[` / `\\\\]`。先還原分隔符，讓下面的
+    // 標準 LaTeX 分隔符規則可以統一處理；數學內容本身保持不變。
+    .replace(/\\\\\[/g, "\\[")
+    .replace(/\\\\\]/g, "\\]")
     .replace(
       /\\\[([\s\S]*?)\\\]/g,
       (_, equation) =>
@@ -145,6 +153,36 @@ function restoreProtectedContent(
   });
 
   return result;
+}
+
+/**
+ * Notion 貼上純文字時不會把 Markdown 的 `$...$` 轉成公式，
+ * 因此將常見的簡單行內數學改成可直接閱讀的文字與 Unicode 下標。
+ */
+function makeInlineMathNotionFriendly(input: string) {
+  const subscripts: Record<string, string> = {
+    "0": "₀",
+    "1": "₁",
+    "2": "₂",
+    "3": "₃",
+    "4": "₄",
+    "5": "₅",
+    "6": "₆",
+    "7": "₇",
+    "8": "₈",
+    "9": "₉",
+  };
+
+  return input.replace(/\$([^$\n]+)\$/g, (match, equation: string) => {
+    // 保留包含 LaTeX 指令的公式；只轉換可安全顯示為一般文字的內容。
+    if (!/^[A-Za-z0-9_'=+\-(),.\s]+$/.test(equation)) {
+      return match;
+    }
+
+    return equation.replace(/_([0-9])/g, (_, digit: string) =>
+      subscripts[digit]
+    );
+  });
 }
 
 export function convertToNotion(
@@ -186,6 +224,8 @@ export function convertToNotion(
 
   let result =
     processor.stringify(tree);
+
+  result = makeInlineMathNotionFriendly(result);
 
   // STEP 5
   // 最後才把程式碼原封不動塞回來
